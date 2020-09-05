@@ -234,6 +234,11 @@ class OTChartView(generic.list.MultipleObjectTemplateResponseMixin, generic.list
     def render_to_response(self, context):
         return super(OTChartView, self).render_to_response(context)
 
+# TODO: If Add Language or Add Geography section is left blank, do not add as a new entry
+# TODO: Change language/geography 'name' field to unique
+# TODO: If adding new language/geography, add to new site data
+# TODO: LOW - Try/Catch when creating a new language/geography that already exists
+# TODO: If Language/Geography being added already exists, do not add
 
 def add_site(request, pk=None):
     if pk:
@@ -246,20 +251,29 @@ def add_site(request, pk=None):
             return response
     else:
         s = Site()
-
+        l = Language()
+        g = GeoZone()
+    # Runs when user clicks Submit
     if request.method == 'POST':
-        form = SiteForm(request.POST, instance=s)
-        if form.is_valid():
-            new_site = form.save(commit=False)
+        print("Page submitted")
+        site_form = SiteForm(request.POST, instance=s)
+        language_form = LanguageForm(request.POST, instance=l)
+        geo_form = GeoZoneForm(request.POST, instance=g)
+        if site_form.is_valid() and language_form.is_valid() and geo_form.is_valid():
+            new_site = site_form.save(commit=False)
+            new_geo_zone = geo_form.save(commit=False)
+            new_lang = language_form.save(commit=False)
             new_form_created_time = new_site.active_start_date
             # We must check for uniqueness explicitly, as SiteForm has trouble raising unique key errors for duplicate
             # site entries when trying to update a site
             try:
                 new_site.pk = None
                 new_site.validate_unique()
+                new_geo_zone.validate_unique()
+                new_lang.validate_unique()
             except ValidationError as err:
                 messages.error(request, ",".join(err.messages))
-                return render_site_form(request, form, pk)
+                return render_site_form(request, site_form, pk)
 
             if pk: # If updating
                 # We must grab the same object from the DB again, as s is linked to the form and using it here will
@@ -268,6 +282,7 @@ def add_site(request, pk=None):
                 old_version.active_end_date = new_form_created_time
                 old_version.save()
             else:
+                print('New entry')
                 # Check if there are other versions of site
                 if Site.objects.filter(url=new_site.url).count() > 0:
                     next_most_recent_version_of_site = None
@@ -287,10 +302,49 @@ def add_site(request, pk=None):
                         next_most_recent_version_of_site.active_end_date = new_form_created_time
                         next_most_recent_version_of_site.save()
 
-            languages = form.cleaned_data.pop('language')
-            geozones = form.cleaned_data.pop('geography')
+            languages = site_form.cleaned_data.pop('language')
+            geozones = site_form.cleaned_data.pop('geography')
+
+            if language_form.data['language_name'] is not '':
+
+                newly_created_language = language_form.cleaned_data['language_name']
+                new_language_instance = Language.objects.filter(language_name = newly_created_language)
+                languages = languages | new_language_instance
+                new_lang.save(force_insert=True)
+
+            # elif language_form.data['language_name'] is '':
+            #     print('Nothing entered for language')
+
+            if geo_form.data['geozone_name'] is not '':
+                print('geo_form data is not ''')
+                newly_created_geozone = geo_form.cleaned_data['geozone_name']
+                new_geozone_instance = GeoZone.objects.filter(geozone_name = newly_created_geozone)
+                geozones = geozones | new_geozone_instance
+                new_geo_zone.save(force_insert=True)
+
+            # elif geo_form.data['geozone_name'] is '':
+            #     print('Nothing entered for geography')
+            #     print('geozones:', geozones)
+            #     for geo in GeoZone.objects.all():
+            #         print(geo)
+
+
+            # print('newly_created_geozone', newly_created_geozone)
+
+            # print('Searching for newly created geozone in table...')
+            # print(GeoZone.objects.filter(geozone_name=newly_created_geozone))
+
+
+
+
+
+            # print('geozone')
+            # print('geo_form.cleaned_data', geo_form.cleaned_data)
+            # print('lang_form.cleaned_data', language_form.cleaned_data)
+
 
             new_site.save(force_insert=True)
+            # new_lang.save(force_insert=True)
 
             if pk: # Delete existing languages and geographies if updating to prevent duplicates
                 new_site.language.clear()
@@ -309,21 +363,29 @@ def add_site(request, pk=None):
 
         else:
             # Display errors
-            form_errors_string = generate_form_errors_string(form.errors)
+            form_errors_string = generate_form_errors_string(site_form.errors)
             messages.error(request, 'Oops! Something went wrong! Details: %s' % form_errors_string)
-
+    # Initial page load
     else:
+        print("Page loaded")
+        language_form = LanguageForm()
+        geo_form = GeoZoneForm()
         if pk:
-            form = SiteForm(initial={'active_start_date':datetime.now()}, instance=s)
+            site_form = SiteForm(initial={'active_start_date':datetime.now()}, instance=s)
         else:
-            form = SiteForm()
+            site_form = SiteForm()
 
-    return render_site_form(request, form, pk)
+    # print('site_form', site_form)
+    # print('geo_form', geo_form)
+
+    # print('pk:', pk)
+
+    return render(request, 'add_site.html',
+                      {'site_form': site_form, 'language_form':language_form, 'geo_form': geo_form, 'post_url': reverse('sites:add_site'), 'page_title': 'Add Site'})
 
 
 def add_language(request):
     l = Language()
-
     if request.method == 'POST':
         form = LanguageForm(request.POST, instance=l)
         if form.is_valid():
